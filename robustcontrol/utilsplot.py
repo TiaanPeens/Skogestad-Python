@@ -255,6 +255,312 @@ def bodeclosedloop(G, K, w_start=-2, w_end=2,
     plt.ylabel("Phase")
     plt.xlabel("Frequency [rad/s]")
 
+    
+def step(G, t_end=100, initial_val=0, input_label=None,
+         output_label=None, points=1000):
+    """
+    This function is similar to the MatLab step function.
+
+    Parameters
+    ----------
+    G : tf
+        Plant transfer function.
+    t_end : integer
+        Time period which the step response should occur (optional).
+    initial_val : integer
+        Starting value to evaluate step response (optional).
+    input_label : array
+        List of input variable labels.
+    output_label : array
+        List of output variable labels.
+
+    Returns
+    -------
+    Plot : matplotlib figure
+    """
+
+    plt.gcf().set_facecolor('white')
+
+    rows = numpy.shape(G(0))[0]
+    columns = numpy.shape(G(0))[1]
+
+    s = utils.tf([1, 0])
+    system = G(s)
+
+    if (input_label is None) and (output_label is None):
+        labels = False
+    elif ((numpy.shape(input_label)[0] == columns) and
+          (numpy.shape(output_label)[0] == rows)):
+        labels = True
+    else:
+        raise ValueError('Label count is inconsistent to plant size')
+
+    fig = adjust_spine('Time', 'Output magnitude', -0.05, 0.1, 0.8, 0.9)
+
+    cnt = 0
+    tspace = numpy.linspace(0, t_end, points)
+    for i in range(rows):
+        for j in range(columns):
+            cnt += 1
+            nulspace = numpy.zeros(points)
+            ax = fig.add_subplot(rows + 1, columns, cnt)
+            tf = system[i, j]
+            if all(tf.numerator) != 0:
+                realstep = numpy.real(tf.step(initial_val, tspace))
+                ax.plot(realstep[0], realstep[1])
+            else:
+                ax.plot(tspace, nulspace)
+            if labels:
+                ax.set_title('Output ({}) vs. Input ({})'.format(
+                    output_label[i], input_label[j]))
+            else:
+                ax.set_title('Output {} vs. Input {}'.format(i + 1, j + 1))
+
+            if i == 0:
+                xax = ax
+            else:
+                ax.sharex = xax
+
+            if j == 0:
+                yax = ax
+                ax.set_ylabel = output_label[j]
+            else:
+                ax.sharey = yax
+
+            plt.setp(ax.get_yticklabels(), fontsize=10)
+            box = ax.get_position()
+            ax.set_position([box.x0, box.y0 * 1.05 - 0.05,
+                             box.width * 0.8, box.height * 0.9])
+
+
+def freq_step_response_plot(G, K, Kc, t_end=50, freqtype='S', w_start=-2,
+                            w_end=2, axlim=None, points=1000):
+    """
+    A subplot function for both the frequency response and step response for a
+    controlled plant
+
+    Parameters
+    ----------
+    G : tf
+        Plant transfer function.
+    K : tf
+        Controller transfer function.
+    Kc : integer
+        Controller constant.
+    t_end : integer
+        Time period which the step response should occur.
+    freqtype : string (optional)
+        Type of function to plot:
+
+        ========    ==================================
+        freqtype    Type of function to plot
+        ========    ==================================
+        S           Sensitivity function
+        T           Complementary sensitivity function
+        L           Loop function
+        ========    ==================================
+
+    Returns
+    -------
+    Plot : matplotlib figure
+
+    """
+
+    _, w, axlim = df.frequency_plot_setup(axlim, w_start, w_end, points)
+
+    plt.subplot(1, 2, 1)
+
+    # Controllers transfer function with various controller gains
+    Ks = [(kc * K) for kc in Kc]
+    Ts = [utils.feedback(G * Kss, 1) for Kss in Ks]
+
+    if freqtype == 'S':
+        Fs = [(1 - Tss) for Tss in Ts]
+        plt.title('(a) Sensitivity function')
+        plt.ylabel('Magnitude $|S|$')
+    elif freqtype == 'T':
+        Fs = Ts
+        plt.title('(a) Complementary sensitivity function')
+        plt.ylabel('Magnitude $|T|$')
+    else:  # freqtype=='L'
+        Fs = [(G*Kss) for Kss in Ks]
+        plt.title('(a) Loop function')
+        plt.ylabel('Magnitude $|L|$')
+
+    wi = w * 1j
+    i = 0
+    for F in Fs:
+        plt.loglog(w, abs(F(wi)), label='Kc={d%s}=' % Kc[i])
+        i += 1
+    plt.axis(axlim)
+    plt.grid(b=None, which='both', axis='both')
+    plt.xlabel('Frequency [rad/unit time]')
+    plt.legend(["Kc = %1.2f" % k for k in Kc], loc=4)
+
+    plt.subplot(1, 2, 2)
+    plt.title('(b) Response to step in reference')
+    tspan = numpy.linspace(0, t_end, points)
+    for T in Ts:
+        [t, y] = T.step(0, tspan)
+        plt.plot(t, y)
+    plt.plot(tspan, 0 * numpy.ones(points), ls='--')
+    plt.plot(tspan, 1 * numpy.ones(points), ls='--')
+    plt.axis(axlim)
+    plt.xlabel('Time')
+    plt.ylabel('$y(t)$')
+
+
+def step_response_plot(Y, U, t_end=50, initial_val=0, timedim='sec',
+                       axlim=None, points=1000, constraint=None,
+                       method='numeric'):
+    """
+    A plot of the step response of a transfer function
+
+    Parameters
+    ----------
+    Y : tf
+        Output transfer function.
+    U : tf
+        Input transfer function.
+    t_end : integer
+        Time period over which the step response should occur (optional).
+    initial_val : integer
+        Starting value to evaluate step response (optional).
+    constraint : float
+        The upper limit that the step response cannot exceed. Is only calculated
+        if a value is specified (optional).
+    method : ['numeric','analytic']
+        The method that is used to calculate a constrained response. A
+        constraint value is required (optional).
+
+    Returns
+    -------
+    Plot : matplotlib figure
+
+    """
+
+    axlim = df.frequency_plot_setup(axlim)
+
+    [t, y] = utils.tf_step(Y, t_end, initial_val)
+    plt.plot(t, y)
+
+    [t, y] = utils.tf_step(U, t_end, initial_val)
+    plt.plot(t, y)
+
+    if constraint is None:
+        plt.legend(['$y(t)$', '$u(t)$'])
+    else:
+        [t, y] = utils.tf_step(U, t_end, initial_val,
+                               points, constraint, Y, method)
+        plt.plot(t, y[0])
+        plt.plot(t, y[1])
+        # con = constraint
+        plt.legend(['$y(t)$', '$u(t)$', '$u(t) const$', '$y(t) const$'])
+
+    plt.plot([0, t_end], numpy.ones(2), '--')
+
+    plt.axis(axlim)
+    plt.xlabel('Time [' + timedim + ']')
+
+
+def perf_Wp_plot(S, wB_req, maxSSerror, w_start, w_end,
+                 axlim=None, points=1000):
+    """
+    MIMO sensitivity S and performance weight Wp plotting function.
+
+    Parameters
+    ----------
+    S : numpy array
+        Sensitivity transfer function matrix as function of s => S(s)
+    wB_req : float
+        The design or require bandwidth of the plant in rad/time.
+        1/time eg: wB_req = 1/20sec = 0.05rad/s
+    maxSSerror : float
+        The maximum stead state tracking error required of the plant.
+    w_start : float
+        Minimum power of w for the frequency range in rad/time.
+        eg: for w starting at 10e-3, wStart = -3.
+    w_end : float
+        Maximum value of w for the frequency range in rad/time.
+        eg: for w ending at 10e3, wStart = 3.
+
+    Returns
+    -------
+    wB : float
+        The actually plant bandwidth in rad/time given the specified controller
+        used to generate the sensitivity matrix S(s).
+    Plot : matplotlib figure
+
+    Example
+    -------
+    >>> K = numpy.array([[1., 2.],
+    ...                  [3., 4.]])
+    >>> t1 = numpy.array([[5., 5.],
+    ...                   [5., 5.]])
+    >>> t2 = numpy.array([[5., 6.],
+    ...                   [7., 8.]])
+    >>> Kc = numpy.array([[0.1, 0.],
+    ...                   [0., 0.1]])*10
+    >>>
+    >>> def G(s):
+    ...     return K*numpy.exp(-t1*s)/(t2*s + 1)
+    ...
+    >>> def L(s):
+    ...     return Kc*G(s)
+    ...
+    >>> def S(s):
+    ... # SVD of S = 1/(I + L)
+    ...     return numpy.linalg.inv((numpy.eye(2) + L(s)))
+    >>> perf_Wp_plot(S, 0.05, 0.2, -3, 1)
+    0.14661086840469845
+    """
+
+    s, w, axlim = df.frequency_plot_setup(axlim, w_start, w_end, points)
+
+    magPlotS1 = numpy.zeros((len(w)))
+    magPlotS3 = numpy.zeros((len(w)))
+    Wpi = numpy.zeros((len(w)))
+    f = 0                                    # f for flag
+    for i in range(len(w)):
+        _, Sv, _ = utils.SVD(S(s[i]))
+        magPlotS1[i] = Sv[0]
+        magPlotS3[i] = Sv[-1]
+        if f < 1 and magPlotS1[i] > 0.707:
+            wB = w[i]
+            f = 1
+    for i in range(len(w)):
+        # 2j is max frequency, as required by utils.Wp
+        Wpi[i] = utils.Wp(wB_req, w_end, maxSSerror, s[i])
+
+    plt.subplot(2, 1, 1)
+    plt.loglog(w, magPlotS1, 'r-', label='Max $\sigma$(S)')
+    plt.loglog(w, 1./Wpi, 'k:', label='|1/W$_P$|', lw=2.)
+    plt.axhline(0.707, color='green', ls=':', lw=2, label='|S| = 0.707')
+    plt.axvline(wB_req, color='blue', ls=':', lw=2)
+    plt.text(wB_req*1.1, 7, 'req wB', color='blue', fontsize=10)
+    plt.axvline(wB, color='green')
+    plt.text(wB*1.1, 0.12, 'wB = %0.3f rad/s' % wB, color='green', fontsize=10)
+    plt.axis(axlim)
+    plt.grid(True)
+    plt.xlabel('Frequency [rad/unit time]')
+    plt.ylabel('Magnitude')
+    plt.legend(loc='upper left', fontsize=10, ncol=1)
+
+    plt.subplot(2, 1, 2)
+    plt.semilogx(w, magPlotS1*Wpi, 'r-', label='|W$_P$S|')
+    plt.axhline(1, color='blue', ls=':', lw=2)
+    plt.axvline(wB_req, color='blue', ls=':', lw=2, label='|W$_P$S| = 1')
+    plt.text(wB_req*1.1, numpy.max(magPlotS1*Wpi)*0.95,
+             'req wB', color='blue', fontsize=10)
+    plt.axvline(wB, color='green')
+    plt.text(wB*1.1, 0.12, 'wB = %0.3f rad/s' % wB, color='green', fontsize=10)
+    plt.axis(axlim)
+    plt.xlabel('Frequency [rad/unit time]')
+    plt.ylabel('Magnitude')
+    plt.legend(loc='upper right', fontsize=10, ncol=1)
+
+    return wB
+
 
 ###############################################################################
 #                                Chapter 4                                    #
@@ -1075,307 +1381,3 @@ def input_acceptable_const_plot(G, Gd, w_start=-2, w_end=2, axlim=None,
 ###############################################################################
 
 
-def step(G, t_end=100, initial_val=0, input_label=None,
-         output_label=None, points=1000):
-    """
-    This function is similar to the MatLab step function.
-
-    Parameters
-    ----------
-    G : tf
-        Plant transfer function.
-    t_end : integer
-        Time period which the step response should occur (optional).
-    initial_val : integer
-        Starting value to evaluate step response (optional).
-    input_label : array
-        List of input variable labels.
-    output_label : array
-        List of output variable labels.
-
-    Returns
-    -------
-    Plot : matplotlib figure
-    """
-
-    plt.gcf().set_facecolor('white')
-
-    rows = numpy.shape(G(0))[0]
-    columns = numpy.shape(G(0))[1]
-
-    s = utils.tf([1, 0])
-    system = G(s)
-
-    if (input_label is None) and (output_label is None):
-        labels = False
-    elif ((numpy.shape(input_label)[0] == columns) and
-          (numpy.shape(output_label)[0] == rows)):
-        labels = True
-    else:
-        raise ValueError('Label count is inconsistent to plant size')
-
-    fig = adjust_spine('Time', 'Output magnitude', -0.05, 0.1, 0.8, 0.9)
-
-    cnt = 0
-    tspace = numpy.linspace(0, t_end, points)
-    for i in range(rows):
-        for j in range(columns):
-            cnt += 1
-            nulspace = numpy.zeros(points)
-            ax = fig.add_subplot(rows + 1, columns, cnt)
-            tf = system[i, j]
-            if all(tf.numerator) != 0:
-                realstep = numpy.real(tf.step(initial_val, tspace))
-                ax.plot(realstep[0], realstep[1])
-            else:
-                ax.plot(tspace, nulspace)
-            if labels:
-                ax.set_title('Output ({}) vs. Input ({})'.format(
-                    output_label[i], input_label[j]))
-            else:
-                ax.set_title('Output {} vs. Input {}'.format(i + 1, j + 1))
-
-            if i == 0:
-                xax = ax
-            else:
-                ax.sharex = xax
-
-            if j == 0:
-                yax = ax
-                ax.set_ylabel = output_label[j]
-            else:
-                ax.sharey = yax
-
-            plt.setp(ax.get_yticklabels(), fontsize=10)
-            box = ax.get_position()
-            ax.set_position([box.x0, box.y0 * 1.05 - 0.05,
-                             box.width * 0.8, box.height * 0.9])
-
-
-def freq_step_response_plot(G, K, Kc, t_end=50, freqtype='S', w_start=-2,
-                            w_end=2, axlim=None, points=1000):
-    """
-    A subplot function for both the frequency response and step response for a
-    controlled plant
-
-    Parameters
-    ----------
-    G : tf
-        Plant transfer function.
-    K : tf
-        Controller transfer function.
-    Kc : integer
-        Controller constant.
-    t_end : integer
-        Time period which the step response should occur.
-    freqtype : string (optional)
-        Type of function to plot:
-
-        ========    ==================================
-        freqtype    Type of function to plot
-        ========    ==================================
-        S           Sensitivity function
-        T           Complementary sensitivity function
-        L           Loop function
-        ========    ==================================
-
-    Returns
-    -------
-    Plot : matplotlib figure
-
-    """
-
-    _, w, axlim = df.frequency_plot_setup(axlim, w_start, w_end, points)
-
-    plt.subplot(1, 2, 1)
-
-    # Controllers transfer function with various controller gains
-    Ks = [(kc * K) for kc in Kc]
-    Ts = [utils.feedback(G * Kss, 1) for Kss in Ks]
-
-    if freqtype == 'S':
-        Fs = [(1 - Tss) for Tss in Ts]
-        plt.title('(a) Sensitivity function')
-        plt.ylabel('Magnitude $|S|$')
-    elif freqtype == 'T':
-        Fs = Ts
-        plt.title('(a) Complementary sensitivity function')
-        plt.ylabel('Magnitude $|T|$')
-    else:  # freqtype=='L'
-        Fs = [(G*Kss) for Kss in Ks]
-        plt.title('(a) Loop function')
-        plt.ylabel('Magnitude $|L|$')
-
-    wi = w * 1j
-    i = 0
-    for F in Fs:
-        plt.loglog(w, abs(F(wi)), label='Kc={d%s}=' % Kc[i])
-        i += 1
-    plt.axis(axlim)
-    plt.grid(b=None, which='both', axis='both')
-    plt.xlabel('Frequency [rad/unit time]')
-    plt.legend(["Kc = %1.2f" % k for k in Kc], loc=4)
-
-    plt.subplot(1, 2, 2)
-    plt.title('(b) Response to step in reference')
-    tspan = numpy.linspace(0, t_end, points)
-    for T in Ts:
-        [t, y] = T.step(0, tspan)
-        plt.plot(t, y)
-    plt.plot(tspan, 0 * numpy.ones(points), ls='--')
-    plt.plot(tspan, 1 * numpy.ones(points), ls='--')
-    plt.axis(axlim)
-    plt.xlabel('Time')
-    plt.ylabel('$y(t)$')
-
-
-def step_response_plot(Y, U, t_end=50, initial_val=0, timedim='sec',
-                       axlim=None, points=1000, constraint=None,
-                       method='numeric'):
-    """
-    A plot of the step response of a transfer function
-
-    Parameters
-    ----------
-    Y : tf
-        Output transfer function.
-    U : tf
-        Input transfer function.
-    t_end : integer
-        Time period over which the step response should occur (optional).
-    initial_val : integer
-        Starting value to evaluate step response (optional).
-    constraint : float
-        The upper limit that the step response cannot exceed. Is only calculated
-        if a value is specified (optional).
-    method : ['numeric','analytic']
-        The method that is used to calculate a constrained response. A
-        constraint value is required (optional).
-
-    Returns
-    -------
-    Plot : matplotlib figure
-
-    """
-
-    axlim = df.frequency_plot_setup(axlim)
-
-    [t, y] = utils.tf_step(Y, t_end, initial_val)
-    plt.plot(t, y)
-
-    [t, y] = utils.tf_step(U, t_end, initial_val)
-    plt.plot(t, y)
-
-    if constraint is None:
-        plt.legend(['$y(t)$', '$u(t)$'])
-    else:
-        [t, y] = utils.tf_step(U, t_end, initial_val,
-                               points, constraint, Y, method)
-        plt.plot(t, y[0])
-        plt.plot(t, y[1])
-        # con = constraint
-        plt.legend(['$y(t)$', '$u(t)$', '$u(t) const$', '$y(t) const$'])
-
-    plt.plot([0, t_end], numpy.ones(2), '--')
-
-    plt.axis(axlim)
-    plt.xlabel('Time [' + timedim + ']')
-
-
-def perf_Wp_plot(S, wB_req, maxSSerror, w_start, w_end,
-                 axlim=None, points=1000):
-    """
-    MIMO sensitivity S and performance weight Wp plotting function.
-
-    Parameters
-    ----------
-    S : numpy array
-        Sensitivity transfer function matrix as function of s => S(s)
-    wB_req : float
-        The design or require bandwidth of the plant in rad/time.
-        1/time eg: wB_req = 1/20sec = 0.05rad/s
-    maxSSerror : float
-        The maximum stead state tracking error required of the plant.
-    w_start : float
-        Minimum power of w for the frequency range in rad/time.
-        eg: for w starting at 10e-3, wStart = -3.
-    w_end : float
-        Maximum value of w for the frequency range in rad/time.
-        eg: for w ending at 10e3, wStart = 3.
-
-    Returns
-    -------
-    wB : float
-        The actually plant bandwidth in rad/time given the specified controller
-        used to generate the sensitivity matrix S(s).
-    Plot : matplotlib figure
-
-    Example
-    -------
-    >>> K = numpy.array([[1., 2.],
-    ...                  [3., 4.]])
-    >>> t1 = numpy.array([[5., 5.],
-    ...                   [5., 5.]])
-    >>> t2 = numpy.array([[5., 6.],
-    ...                   [7., 8.]])
-    >>> Kc = numpy.array([[0.1, 0.],
-    ...                   [0., 0.1]])*10
-    >>>
-    >>> def G(s):
-    ...     return K*numpy.exp(-t1*s)/(t2*s + 1)
-    ...
-    >>> def L(s):
-    ...     return Kc*G(s)
-    ...
-    >>> def S(s):
-    ... # SVD of S = 1/(I + L)
-    ...     return numpy.linalg.inv((numpy.eye(2) + L(s)))
-    >>> perf_Wp_plot(S, 0.05, 0.2, -3, 1)
-    0.14661086840469845
-    """
-
-    s, w, axlim = df.frequency_plot_setup(axlim, w_start, w_end, points)
-
-    magPlotS1 = numpy.zeros((len(w)))
-    magPlotS3 = numpy.zeros((len(w)))
-    Wpi = numpy.zeros((len(w)))
-    f = 0                                    # f for flag
-    for i in range(len(w)):
-        _, Sv, _ = utils.SVD(S(s[i]))
-        magPlotS1[i] = Sv[0]
-        magPlotS3[i] = Sv[-1]
-        if f < 1 and magPlotS1[i] > 0.707:
-            wB = w[i]
-            f = 1
-    for i in range(len(w)):
-        # 2j is max frequency, as required by utils.Wp
-        Wpi[i] = utils.Wp(wB_req, w_end, maxSSerror, s[i])
-
-    plt.subplot(2, 1, 1)
-    plt.loglog(w, magPlotS1, 'r-', label='Max $\sigma$(S)')
-    plt.loglog(w, 1./Wpi, 'k:', label='|1/W$_P$|', lw=2.)
-    plt.axhline(0.707, color='green', ls=':', lw=2, label='|S| = 0.707')
-    plt.axvline(wB_req, color='blue', ls=':', lw=2)
-    plt.text(wB_req*1.1, 7, 'req wB', color='blue', fontsize=10)
-    plt.axvline(wB, color='green')
-    plt.text(wB*1.1, 0.12, 'wB = %0.3f rad/s' % wB, color='green', fontsize=10)
-    plt.axis(axlim)
-    plt.grid(True)
-    plt.xlabel('Frequency [rad/unit time]')
-    plt.ylabel('Magnitude')
-    plt.legend(loc='upper left', fontsize=10, ncol=1)
-
-    plt.subplot(2, 1, 2)
-    plt.semilogx(w, magPlotS1*Wpi, 'r-', label='|W$_P$S|')
-    plt.axhline(1, color='blue', ls=':', lw=2)
-    plt.axvline(wB_req, color='blue', ls=':', lw=2, label='|W$_P$S| = 1')
-    plt.text(wB_req*1.1, numpy.max(magPlotS1*Wpi)*0.95,
-             'req wB', color='blue', fontsize=10)
-    plt.axvline(wB, color='green')
-    plt.text(wB*1.1, 0.12, 'wB = %0.3f rad/s' % wB, color='green', fontsize=10)
-    plt.axis(axlim)
-    plt.xlabel('Frequency [rad/unit time]')
-    plt.ylabel('Magnitude')
-    plt.legend(loc='upper right', fontsize=10, ncol=1)
-
-    return wB
